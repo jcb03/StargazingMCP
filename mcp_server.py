@@ -24,8 +24,8 @@ class StargazingRequest(BaseModel):
     state: Optional[str] = ""
     celestial_object: Optional[str] = "general"
 
-# Initialize FastMCP
-mcp = FastMCP("Astro-Weather Stargazing Guide")
+# FIXED: Initialize FastMCP with stateless mode
+mcp = FastMCP("Astro-Weather Stargazing Guide", stateless_http=True)
 
 # Initialize services
 astro_service = AstronomyService()
@@ -34,7 +34,7 @@ weather_service = IndianWeatherService()
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 🛠️ HELPER FUNCTIONS (Fixed - removed 'self' references)
+# 🛠️ HELPER FUNCTIONS
 def format_viewing_times(viewing_times: List[Dict]) -> str:
     """Format viewing times for display"""
     if not viewing_times:
@@ -92,9 +92,10 @@ async def get_stargazing_forecast(
     """
     try:
         # Get city coordinates
-        city_info = get_city_info(city)
+        city_info = get_city_info(city.lower())
         if not city_info:
-            return f"❌ City '{city}' not found in Indian locations database. Try: {', '.join(list(INDIAN_CITIES.keys())[:10])}"
+            available_cities = list(INDIAN_CITIES.keys())[:10]
+            return f"❌ City '{city}' not found. Available cities: {', '.join(available_cities)}"
         
         lat, lon = city_info['lat'], city_info['lon']
         full_location = f"{city.title()}, {city_info['state']}"
@@ -137,7 +138,6 @@ async def get_stargazing_forecast(
             max_tokens=1200
         )
         
-        # FIXED: Access response correctly
         ai_analysis = response.choices[0].message.content
         
         # Format final response
@@ -184,7 +184,7 @@ Score: {weather_assessment.get('score', 75)}/100
 
 ⏰ **Updated:** {datetime.now().strftime('%Y-%m-%d %H:%M IST')}
 🇮🇳 **Built for Indian stargazers**
-"""
+        """
         
     except Exception as e:
         return f"❌ Error generating stargazing forecast: {str(e)}"
@@ -200,7 +200,7 @@ async def find_celestial_object(
     """
     try:
         # Get city coordinates
-        city_info = get_city_info(city)
+        city_info = get_city_info(city.lower())
         if not city_info:
             return f"❌ City '{city}' not found. Available cities: {', '.join(list(INDIAN_CITIES.keys())[:10])}"
         
@@ -240,7 +240,6 @@ async def find_celestial_object(
             max_tokens=1000
         )
         
-        # FIXED: Access response correctly
         ai_analysis = response.choices[0].message.content
         
         return f"""
@@ -262,188 +261,10 @@ async def find_celestial_object(
 • Sun Surveyor for planning observations
 
 Built with ❤️ for Indian stargazers 🇮🇳
-"""
+        """
         
     except Exception as e:
         return f"❌ Error finding celestial object: {str(e)}"
-
-@mcp.tool()
-async def get_upcoming_events(
-    city: str,
-    days_ahead: int = 14,
-    state: str = ""
-) -> str:
-    """
-    Get upcoming astronomical events and optimal viewing dates for Indian locations
-    """
-    try:
-        # Get city coordinates
-        city_info = get_city_info(city)
-        if not city_info:
-            return f"❌ City not found. Try: {', '.join(list(INDIAN_CITIES.keys())[:8])}"
-        
-        lat, lon = city_info['lat'], city_info['lon']
-        full_location = f"{city.title()}, {city_info['state']}"
-        
-        # Get celestial events
-        events_data = await astro_service.get_celestial_events(lat, lon, days_ahead)
-        
-        # Generate AI analysis
-        prompt = f"""
-        Create an astronomical events calendar for {full_location}, India for the next {days_ahead} days.
-        
-        Available events data: {events_data}
-        Location: {lat:.4f}°N, {lon:.4f}°E
-        
-        Provide:
-        1. Upcoming astronomical events (eclipses, meteor showers, planetary alignments)
-        2. Best viewing dates for planets (Jupiter, Saturn, Mars, Venus)
-        3. Moon phases and their impact on stargazing
-        4. International Space Station (ISS) passes
-        5. Seasonal constellation highlights
-        6. Special events like comet appearances
-        7. Photography opportunities
-        
-        For each event, include:
-        - Date and time in IST
-        - Visibility from this Indian location
-        - Viewing tips and equipment needed
-        - Duration of the event
-        
-        Include cultural context where relevant (Indian astronomical traditions).
-        """
-        
-        response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1200
-        )
-        
-        # FIXED: Access response correctly
-        ai_calendar = response.choices[0].message.content
-        
-        return f"""
-🗓️ **Astronomical Events Calendar**
-
-📍 **Location:** {full_location}
-📅 **Period:** Next {days_ahead} days from {datetime.now().strftime('%Y-%m-%d')}
-
-{ai_calendar}
-
-**🔗 Events from Database:**
-{format_events(events_data.get('events', []))}
-
-**🌟 Pro Tips for Indian Observers:**
-• Best viewing is 1-2 hours after sunset and before sunrise
-• Head to darker areas outside city limits for better visibility
-• Use red light to preserve night vision
-• Check local weather forecasts before planning trips
-
-**📱 Useful Resources:**
-• TimeAndDate.com for precise local times
-• In-The-Sky.org for detailed event information
-• NASA's eclipse website for eclipse paths
-
-⏰ **Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M IST')}
-🇮🇳 **Tailored for India**
-"""
-        
-    except Exception as e:
-        return f"❌ Error getting upcoming events: {str(e)}"
-
-@mcp.tool()
-async def suggest_stargazing_locations(
-    city: str,
-    radius_km: int = 100,
-    state: str = ""
-) -> str:
-    """
-    Suggest best stargazing locations near Indian cities considering light pollution
-    """
-    try:
-        # Get city info
-        city_info = get_city_info(city)
-        if not city_info:
-            return f"❌ City not found in database"
-        
-        lat, lon = city_info['lat'], city_info['lon']
-        
-        # Generate AI recommendations for stargazing spots
-        prompt = f"""
-        Suggest the best stargazing locations within {radius_km}km of {city.title()}, {city_info['state']}, India.
-        
-        Base location: {lat:.4f}°N, {lon:.4f}°E
-        
-        Provide recommendations for:
-        1. Dark sky locations with minimal light pollution
-        2. Accessible spots for families and beginners
-        3. Advanced locations for serious astronomers
-        4. Hill stations or elevated areas nearby
-        5. Lakes or open areas with clear horizons
-        
-        For each location, include:
-        - Approximate distance from {city}
-        - Accessibility (road conditions, permits needed)
-        - Best features for stargazing
-        - Accommodation options if overnight
-        - Safety considerations
-        - Local attractions to combine with stargazing
-        
-        Focus on real, accessible locations in India.
-        Include practical travel information.
-        """
-        
-        response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1000
-        )
-        
-        # FIXED: Access response correctly
-        ai_suggestions = response.choices[0].message.content
-        
-        # Find nearby cities from database
-        from indian_locations import find_nearby_cities
-        nearby_cities = find_nearby_cities(lat, lon, radius_km)
-        
-        nearby_info = ""
-        for city_name, info, distance in nearby_cities[:5]:
-            if distance > 10:  # Skip very close cities
-                nearby_info += f"• {city_name.replace('_', ' ').title()}: {distance:.0f}km away\n"
-        
-        return f"""
-🏔️ **Best Stargazing Locations near {city.title()}**
-
-📍 **Search radius:** {radius_km}km from {city.title()}, {city_info['state']}
-
-{ai_suggestions}
-
-**🌃 Nearby Cities in Database:**
-{nearby_info}
-
-**🚗 General Travel Tips:**
-• Travel during new moon phases for darkest skies
-• Carry warm clothing - temperatures drop at night
-• Bring red flashlight to preserve night vision
-• Check local weather and road conditions
-• Inform family/friends about your stargazing plans
-
-**📱 Apps for Light Pollution:**
-• Light Pollution Map (shows dark sky areas)
-• Clear Outside (weather for astronomy)
-• PhotoPills (planning tool for astrophotography)
-
-**🏕️ Stargazing Etiquette:**
-• Leave no trace - clean up after yourself
-• Use minimal lighting to not disturb others
-• Respect private property and local communities
-• Follow park/reserve rules and timings
-
-Built for Indian stargazers 🇮🇳 ⭐
-"""
-        
-    except Exception as e:
-        return f"❌ Error suggesting locations: {str(e)}"
 
 @mcp.tool()
 async def help() -> str:
@@ -455,8 +276,9 @@ async def help() -> str:
 
 🔭 **get_stargazing_forecast** - Complete stargazing forecast with weather + astronomy
 🌟 **find_celestial_object** - Find when/where to observe planets, constellations, etc.
-📅 **get_upcoming_events** - Astronomical events calendar for your location  
-🏔️ **suggest_stargazing_locations** - Best dark sky spots near Indian cities
+❓ **help** - Show this help message
+✅ **validate** - Validate server connection
+ℹ️ **about** - About this server
 
 **भारतीय शहर (Supported Indian Cities):**
 Delhi, Mumbai, Bangalore, Chennai, Kolkata, Hyderabad, Pune, Ahmedabad, Jaipur, Udaipur, Manali, Rishikesh, Ooty, Goa, Darjeeling, Shimla, Coorg, Mount Abu
@@ -465,28 +287,21 @@ Delhi, Mumbai, Bangalore, Chennai, Kolkata, Hyderabad, Pune, Ahmedabad, Jaipur, 
 1. WhatsApp पर Puch AI से जुड़ें
 2. "Delhi में आज रात stargazing कैसी रहेगी?" पूछें
 3. "Jupiter कब दिखेगा Mumbai से?" जानें
-4. "Bangalore के पास dark sky locations" खोजें
 
 **Example Commands:**
 - "Stargazing forecast for Delhi tonight"
 - "When can I see Saturn from Bangalore?"
-- "Upcoming meteor showers in Chennai"
-- "Best stargazing spots near Jaipur"
+- "Find Jupiter from Chennai"
 
 **विशेषताएं (Features):**
 ✅ Real-time Indian weather data
 ✅ Astronomical calculations for India
-✅ Light pollution considerations
 ✅ Hindi + English support
 ✅ Cultural astronomical references
-✅ Photography tips
-
-**🌌 Celestial Objects You Can Track:**
-Planets (Jupiter, Saturn, Mars, Venus), Moon phases, Constellations, Meteor showers, International Space Station (ISS), Comets, Eclipses
 
 🚀 Built for Indian stargazers with ❤️
 🏆 Combining astronomy + meteorology for perfect stargazing
-"""
+    """
 
 # Export the mcp server
 __all__ = ["mcp"]
