@@ -25,7 +25,7 @@ if __name__ == "__main__":
             "app:app",
             host="0.0.0.0",
             port=port,
-            reload=True,  # Enable reload for testing
+            reload=True,  
             access_log=True,
             log_level="info"
         )
